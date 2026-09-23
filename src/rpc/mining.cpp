@@ -101,6 +101,11 @@ UniValue getnetworkhashps(const JSONRPCRequest& request)
 
 UniValue generateBlocks(std::shared_ptr<CReserveScript> coinbaseScript, int nGenerate, uint64_t nMaxTries, bool keepScript, int nMineAuxPow)
 {
+    // Mining atop a chain during reindex/import builds new blocks on a
+    // tip that is about to move, causing a fork. Avoid that.
+    if (fReindex || fImporting)
+        throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD, "Whippet is downloading blocks...");
+
     // Whippet: Never mine witness tx
     const bool fMineWitnessTx = false;
     static const int nInnerLoopCount = 0xFFFFFFFF; // Allow full nonce range
@@ -769,6 +774,11 @@ UniValue submitblock(const JSONRPCRequest& request)
             + HelpExampleCli("submitblock", "\"mydata\"")
             + HelpExampleRpc("submitblock", "\"mydata\"")
         );
+
+    // Accepting a submitted block while a reindex/import is still
+    // reconstructing the chain builds on an unsettled tip and risks a fork.
+    if (fReindex || fImporting)
+        throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD, "Whippet is downloading blocks...");
 
     std::shared_ptr<CBlock> blockptr = std::make_shared<CBlock>();
     CBlock& block = *blockptr;
