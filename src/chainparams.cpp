@@ -72,6 +72,7 @@ class CMainParams : public CChainParams {
 private:
     Consensus::Params digishieldConsensus;
     Consensus::Params chainIdFixConsensus;
+    Consensus::Params minSpacingConsensus;
     Consensus::Params auxpowConsensus;
 public:
     CMainParams() {
@@ -147,8 +148,19 @@ public:
         chainIdFixConsensus.nHeightEffective = 80000;
         chainIdFixConsensus.nAuxpowChainId = 0x5750; // "WP" - distinct from Dogecoin (0x0062)
 
+        // Blocks 100000+: lower the minimum block spacing floor from 6s
+        // (equal to nPowTargetSpacing) to 4s. With the floor equal to the
+        // target, generateBlocks()/submitblock() timestamps could never land
+        // under target, so the LWMA retarget algorithm never saw a "too fast"
+        // block and difficulty could only fall to powLimit and stay there,
+        // regardless of real hashrate. A 4s floor leaves the algorithm real
+        // headroom below the 6s target to respond to hashrate changes.
+        minSpacingConsensus = chainIdFixConsensus;
+        minSpacingConsensus.nHeightEffective = 100000;
+        minSpacingConsensus.nMinBlockSpacing = 4;
+
         // Blocks 371337+ are AuxPoW with LWMA
-        auxpowConsensus = chainIdFixConsensus;
+        auxpowConsensus = minSpacingConsensus;
         auxpowConsensus.nHeightEffective = 371337;
         auxpowConsensus.fAllowLegacyBlocks = false;
         auxpowConsensus.fLWMADifficultyCalculation = true;
@@ -157,7 +169,8 @@ public:
         pConsensusRoot = &digishieldConsensus;
         digishieldConsensus.pLeft = &consensus;
         digishieldConsensus.pRight = &chainIdFixConsensus;
-        chainIdFixConsensus.pRight = &auxpowConsensus;
+        chainIdFixConsensus.pRight = &minSpacingConsensus;
+        minSpacingConsensus.pRight = &auxpowConsensus;
 
         /**
          * The message start string is designed to be unlikely to occur in normal data.
@@ -176,6 +189,7 @@ public:
         consensus.hashGenesisBlock = genesis.GetHash();
         digishieldConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
         chainIdFixConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
+        minSpacingConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
         auxpowConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
 
         assert(consensus.hashGenesisBlock == uint256S("0x863714e1c1a15526a0081a35097c56e28dbd43ef97f76fec0ccd5a7510326292"));
@@ -235,6 +249,7 @@ class CTestNetParams : public CChainParams {
 private:
     Consensus::Params digishieldConsensus;
     Consensus::Params chainIdFixConsensus;
+    Consensus::Params minSpacingConsensus;
     Consensus::Params auxpowConsensus;
     Consensus::Params minDifficultyConsensus;
 public:
@@ -309,8 +324,14 @@ public:
         chainIdFixConsensus.nHeightEffective = 80000;
         chainIdFixConsensus.nAuxpowChainId = 0x5750; // "WP" - distinct from Dogecoin (0x0062)
 
+        // Blocks 100000+: lower the minimum block spacing floor from 6s to
+        // 4s, tracking mainnet deliberately (see mainnet for details).
+        minSpacingConsensus = chainIdFixConsensus;
+        minSpacingConsensus.nHeightEffective = 100000;
+        minSpacingConsensus.nMinBlockSpacing = 4;
+
         // Blocks 157500 - 158099 are Digishield with minimum difficulty on all blocks
-        minDifficultyConsensus = chainIdFixConsensus;
+        minDifficultyConsensus = minSpacingConsensus;
         minDifficultyConsensus.nHeightEffective = 157500;
         minDifficultyConsensus.fPowAllowDigishieldMinDifficultyBlocks = true;
         minDifficultyConsensus.fPowAllowMinDifficultyBlocks = true;
@@ -325,7 +346,8 @@ public:
         pConsensusRoot = &digishieldConsensus;
         digishieldConsensus.pLeft = &consensus;
         digishieldConsensus.pRight = &chainIdFixConsensus;
-        chainIdFixConsensus.pRight = &minDifficultyConsensus;
+        chainIdFixConsensus.pRight = &minSpacingConsensus;
+        minSpacingConsensus.pRight = &minDifficultyConsensus;
         minDifficultyConsensus.pRight = &auxpowConsensus;
 
         pchMessageStart[0] = 0xfc;
@@ -339,6 +361,7 @@ public:
         consensus.hashGenesisBlock = genesis.GetHash();
         digishieldConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
         chainIdFixConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
+        minSpacingConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
         minDifficultyConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
         auxpowConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
         assert(consensus.hashGenesisBlock == uint256S("0x863714e1c1a15526a0081a35097c56e28dbd43ef97f76fec0ccd5a7510326292"));
