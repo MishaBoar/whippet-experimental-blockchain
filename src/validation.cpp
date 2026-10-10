@@ -3419,9 +3419,6 @@ static bool AcceptBlockHeader(const CBlockHeader& block, CValidationState& state
             return true;
         }
 
-        if (!CheckBlockHeader(block, state))
-            return error("%s: Consensus::CheckBlockHeader: %s, %s", __func__, hash.ToString(), FormatStateMessage(state));
-
         // Get prev block index
         CBlockIndex* pindexPrev = NULL;
         BlockMap::iterator mi = mapBlockIndex.find(block.hashPrevBlock);
@@ -3432,6 +3429,13 @@ static bool AcceptBlockHeader(const CBlockHeader& block, CValidationState& state
             return state.DoS(100, error("%s: prev block invalid", __func__), REJECT_INVALID, "bad-prevblk");
 
         assert(pindexPrev);
+
+        // The header's real height is known here. The chain-ID check inside
+        // CheckBlockHeader is height-gated, and during headers-first sync the
+        // active tip lags far behind the header being accepted, so it must
+        // not fall back to estimating the height from the tip.
+        if (!CheckBlockHeader(block, state, true, pindexPrev->nHeight + 1))
+            return error("%s: Consensus::CheckBlockHeader: %s, %s", __func__, hash.ToString(), FormatStateMessage(state));
 
         if (!ContextualCheckBlockHeader(block, state, pindexPrev, GetAdjustedTime()))
             return error("%s: Consensus::ContextualCheckBlockHeader: %s, %s", __func__, hash.ToString(), FormatStateMessage(state));

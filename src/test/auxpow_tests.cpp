@@ -561,4 +561,81 @@ BOOST_AUTO_TEST_CASE(checkblockheader_explicit_height_overrides_tip_estimate)
     chainActive.SetTip(NULL);
 }
 
+/**
+ * Regression test for headers-first sync across the height-80000 chain-ID
+ * boundary. AcceptBlockHeader() used to call CheckBlockHeader() without a
+ * height, so the chain-ID check estimated it from chainActive.Height() + 1.
+ * During headers-first sync the active tip lags far behind the headers being
+ * accepted, so a node at blocks=78000 rejected every valid header at 80000+
+ * (expecting the old chain ID) and banscored the honest peer.
+ *
+ * Here the active tip stays empty while the header's parent sits just past
+ * height 80000. The header must be judged by its parent's height, so the new chain
+ * ID gets past the chain-ID check and is only turned away by a later,
+ * unrelated check (a deliberately wrong difficulty, which also keeps the
+ * header from being added to the index on top of a fake parent), while the
+ * old chain ID is rejected by the chain-ID check itself.
+ */
+BOOST_AUTO_TEST_CASE(acceptblockheader_uses_parent_height_for_chain_id)
+{
+    SelectParams(CBaseChainParams::REGTEST);
+    const CChainParams& chainparams = Params();
+    const Consensus::Params& newParams = chainparams.GetConsensus(80000);
+    const Consensus::Params& oldParams = chainparams.GetConsensus(0);
+    BOOST_CHECK(newParams.nAuxpowChainId != oldParams.nAuxpowChainId);
+
+    chainActive.SetTip(NULL);
+    BOOST_CHECK_EQUAL(chainActive.Height(), -1);
+
+    // Valid PoW (easy to mine) but not the difficulty the parent demands.
+    const arith_uint256 target = (~arith_uint256(0) >> 9);
+
+    uint256 parentHash = uint256S("0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    CBlockIndex parent;
+    // Regtest retargets every block from this height on, which reads one
+    // ancestor back, so the fake parent needs a fake grandparent.
+    uint256 grandparentHash = uint256S("0x00000000000000000000000000000000000000000000000000000000000000aa");
+    CBlockIndex grandparent;
+    grandparent.nHeight = 80000;
+    grandparent.nBits = 0x1d00ffff;
+    grandparent.nTime = 0;
+    grandparent.phashBlock = &grandparentHash;
+    parent.pprev = &grandparent;
+    parent.nHeight = 80001;
+    parent.nBits = 0x1d00ffff;
+    parent.nTime = 1;
+    parent.phashBlock = &parentHash;
+    {
+        LOCK(cs_main);
+        mapBlockIndex[parentHash] = &parent;
+    }
+
+    CBlockHeader newIdHeader;
+    newIdHeader.hashPrevBlock = parentHash;
+    newIdHeader.nBits = target.GetCompact();
+    newIdHeader.SetBaseVersion(4, newParams.nAuxpowChainId);
+    mineBlock(newIdHeader, true);
+
+    CBlockHeader oldIdHeader;
+    oldIdHeader.hashPrevBlock = parentHash;
+    oldIdHeader.nBits = target.GetCompact();
+    oldIdHeader.SetBaseVersion(4, oldParams.nAuxpowChainId);
+    mineBlock(oldIdHeader, true);
+
+    CValidationState newIdState;
+    const CBlockIndex* newIdIndex = NULL;
+    BOOST_CHECK(!ProcessNewBlockHeaders({newIdHeader}, newIdState, chainparams, &newIdIndex));
+    BOOST_CHECK_EQUAL(newIdState.GetRejectReason(), "bad-diffbits");
+
+    CValidationState oldIdState;
+    BOOST_CHECK(!ProcessNewBlockHeaders({oldIdHeader}, oldIdState, chainparams, NULL));
+    BOOST_CHECK_EQUAL(oldIdState.GetRejectReason(), "high-hash");
+
+    {
+        LOCK(cs_main);
+        mapBlockIndex.erase(parentHash);
+    }
+    chainActive.SetTip(NULL);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
