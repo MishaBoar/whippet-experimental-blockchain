@@ -5,9 +5,9 @@ Whippet Core version 1.3.1 is now available from:
 This is an urgent bugfix release. It fixes a chain-halting validation bug:
 every node running 1.3.0 or earlier stops accepting *any* block, including
 its own, at block height 80,000. Mainnet reached that height on 2026-09-21
-and has been unable to progress since. There is no consensus-format change
-and no new feature in this release — it corrects a single validation
-lookup that used the wrong block height.
+and has been unable to progress since. The primary fix corrects validation
+lookups that used the wrong block height; "Other changes" describes two
+small safeguards and a consensus rule change that activates at height 100,000.
 
 Please report bugs using the issue tracker at GitHub:
 
@@ -20,11 +20,16 @@ Compatibility
 Whippet Core is extensively tested on Ubuntu Server LTS, macOS and Windows.
 Minimum OS compatibility can be found [in the INSTALL guide](../../INSTALL.md).
 
-This release changes no consensus rule and requires no new activation height.
-It is a straightforward safety fix: a node running the old, buggy code simply
-cannot build or accept any block at height 80,000 or above, so there is no
-way for it to diverge onto a different chain. Upgrading is what lets a node
-make progress again; not upgrading leaves it stalled, never wrong.
+The chain-ID fix carries no new consensus activation height. A node running
+the old, buggy code simply cannot build or accept any block at height 80,000
+or above, so there is no way for it to diverge onto a different chain.
+Upgrading is what lets a node make progress again; not upgrading leaves it
+stalled, never wrong.
+
+This release also introduces one new consensus rule: at block height 100,000
+the minimum block-spacing floor is lowered from 6 s to 4 s. See "Other
+changes" for the rationale. Every node and miner must be upgraded before
+height 100,000 or it will reject valid post-100,000 blocks.
 
 
 The bug
@@ -59,12 +64,50 @@ need to be exact: the authoritative, correctly-scoped check still happens
 afterward in `ContextualCheckBlockHeader()`, which has the block's real
 height via `pindexPrev` and is unchanged by this release.
 
+Two follow-up changes complete the fix:
+
+- `ConnectBlock()`, `AcceptBlock()`, `TestBlockValidity()` and
+  `CVerifyDB::VerifyDB()` pass the block's real height instead of relying
+  on the tip estimate, so re-verifying blocks below 80,000 on a node whose
+  tip is above it no longer fails.
+- `AcceptBlockHeader()` passes the parent's height plus one. During
+  headers-first sync the active tip lags far behind the headers being
+  accepted, so the tip estimate was wrong there: a node that had not yet
+  connected block 80,000 could reject valid post-80,000 headers from its
+  peers and stall its initial sync at that height.
+
 A new regression test (`src/test/auxpow_tests.cpp`,
 `checkblockheader_uses_tip_height_for_chain_id`) proves the fix directly: it
 points `chainActive`'s tip at a synthetic height-79999 index and checks that
 a block carrying the height-80000 chain ID is now accepted, while one
 carrying the pre-80000 chain ID is rejected — the reverse of what the
 original, fixed `GetConsensus(0)` lookup did.
+
+
+Other changes
+==============
+
+- `whippetd -help-debug` now prints the extended help and exits, like
+  `-help`, instead of silently starting a node. (Inherited from Bitcoin
+  Core 0.13; also submitted to Dogecoin.)
+- The `generate`, `generatetoaddress` and `submitblock` RPCs now refuse to
+  run while a reindex or import is in progress (`fReindex || fImporting`),
+  returning the same "downloading blocks" error as during initial sync.
+  Mining on a tip that is still being rebuilt can fork the chain before a
+  hardcoded checkpoint once the reindex catches up.
+- At height 100,000, the minimum block-spacing floor drops from 6 s to 4 s
+  (`minSpacingConsensus`). With the floor equal to the 6 s target, the LWMA
+  retarget algorithm never observed blocks arriving faster than target, so
+  difficulty could only fall to `powLimit` regardless of hashrate. A 4 s
+  floor gives the algorithm real headroom below the target to respond to
+  hashrate changes. **This is a consensus change: all nodes and miners must
+  upgrade before height 100,000.**
+- RPC basic-auth scheme validation is now case-insensitive (`Basic`,
+  `basic`, etc. are all accepted), per RFC 7235.
+- Inbound connections from the same /16 (IPv4) or /32 (IPv6) subnet are
+  capped at 4 (`DEFAULT_MAX_INBOUND_PER_SUBNET`); whitelisted peers and
+  non-routable addresses are exempt. This improves peer diversity on a
+  network recovering from a stall.
 
 
 Upgrading from Prior Versions
@@ -115,17 +158,25 @@ Testing
   pre-fix code (reintroducing `Params().GetConsensus(0)` makes both of its
   assertions fail in the direction the original bug did) and passes against
   the fix, without mining through height 80,000.
-- Full unit test suite: 314 test cases, all passing.
+- `auxpow_tests` gained `acceptblockheader_uses_parent_height_for_chain_id`
+  (headers-first case, active chain empty; fails without the
+  `AcceptBlockHeader()` change) and an end-to-end `CVerifyDB` test across
+  the chain-ID boundary.
+- `mining_tests` covers the reindex/import guard on `generate` and
+  `submitblock`; `getarg_tests` covers `-help-debug`.
+- Full unit test suite: 328 test cases, all passing.
 
 
 Release Information
 ===================
 
-**Release Date:** 2026-09-21
+**Release Date:** 2026-09-28
 **Version:** 1.3.1
 **GitHub Tag:** v1.3.1
 **Fixes:** chain-halting `CheckBlockHeader` chain-ID validation bug at block
-height 80,000 (no consensus-format change)
+height 80,000, including during headers-first sync
+**Consensus change:** minimum block-spacing floor lowered from 6 s to 4 s
+at height 100,000 (`minSpacingConsensus`)
 
 For the latest information, visit:
 - GitHub: <https://github.com/chromatic/whippet-experimental-blockchain/>
