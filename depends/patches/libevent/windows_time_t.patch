@@ -1,0 +1,42 @@
+Use 64-bit timestamp storage for the Windows 64-bit time conversion functions.
+
+MinGW's 32-bit time_t occupies four bytes. Passing its address to _gmtime64_s
+or _gmtime64 makes those functions read beyond the object. Widen the value
+before passing its address, and exercise the current-time path in the date test.
+
+--- a/evutil_time.c
++++ b/evutil_time.c
+@@ -202,7 +202,8 @@ evutil_date_rfc1123(char *date, const size_t datelen, const struct tm *tm)
+ 		/** detect _gmtime64()/_gmtime64_s() */
+ #elif defined(EVENT__HAVE__GMTIME64_S)
+ 		errno_t err;
+-		err = _gmtime64_s(&sys, &t);
++		__time64_t t64 = t;
++		err = _gmtime64_s(&sys, &t64);
+ 		if (err) {
+ 			event_errx(1, "Invalid argument to _gmtime64_s");
+ 		} else {
+@@ -210,7 +211,8 @@ evutil_date_rfc1123(char *date, const size_t datelen, const struct tm *tm)
+ 			tm = &sys;
+ 		}
+ #elif defined(EVENT__HAVE__GMTIME64)
+-		tm = _gmtime64(&t);
++		__time64_t t64 = t;
++		tm = _gmtime64(&t64);
+ #else
+ 		tm = gmtime(&t);
+ #endif
+--- a/test/regress_util.c
++++ b/test/regress_util.c
+@@ -1540,6 +1540,11 @@ test_evutil_date_rfc1123(void *arg)
+ 	char result[30];
+ 	size_t i = 0;
+ 
++	/* HTTP Date headers use the current-time conversion path. */
++	tt_int_op(evutil_date_rfc1123(result, sizeof(result), NULL), ==, 29);
++	tt_int_op(strlen(result), ==, 29);
++	tt_str_op(result + 25, ==, " GMT");
++
+ 	/* Checks if too small buffers are safely accepted. */
+ 	{
+ 		create_tm_from_unix_epoch(&query, 0);

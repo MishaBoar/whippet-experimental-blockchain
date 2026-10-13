@@ -11,6 +11,8 @@ from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
 
 import http.client
+import email.utils
+import time
 import urllib.parse
 
 class HTTPBasicsTest (BitcoinTestFramework):
@@ -34,7 +36,14 @@ class HTTPBasicsTest (BitcoinTestFramework):
         conn = http.client.HTTPConnection(url.hostname, url.port)
         conn.connect()
         conn.request('POST', '/', '{"method": "getbestblockhash"}', headers)
-        out1 = conn.getresponse().read()
+        response = conn.getresponse()
+        # Date generation must work with both 32-bit and 64-bit time_t.
+        date_header = response.getheader('Date')
+        assert(date_header is not None)
+        assert(date_header.endswith(' GMT'))
+        response_time = email.utils.parsedate_to_datetime(date_header).timestamp()
+        assert(abs(time.time() - response_time) < 60)
+        out1 = response.read()
         assert(b'"error":null' in out1)
         assert(conn.sock!=None) #according to http/1.1 connection must still be open!
 
