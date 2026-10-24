@@ -1,0 +1,46 @@
+Subject: Avoid accessing unavailable D-Bus interfaces during startup
+
+Backport two Qt fixes to Qt 5.7.1:
+
+Accessibility: Do not use the session bus if not connected
+Author: Frederik Gladhorn <frederik.gladhorn@qt.io>
+Upstream: https://github.com/qt/qtbase/commit/61d990da967d10d15cd8b73d0bee9f36387f8278
+
+Generic Unix Theme: Don't crash if D-Bus is not running
+Author: Gabriel de Dietrich <gabriel.dedietrich@qt.io>
+Upstream: https://github.com/qt/qtbase/commit/53f7c20cb5b5d5b25a70e072db82921ef2a449d1
+
+Check the connection/interface before accessing D-Bus for accessibility
+or the global menu. Both features remain available when D-Bus is present.
+
+Fixes: QTBUG-50189
+Fixes: QTBUG-51940
+
+--- a/qtbase/src/platformsupport/linuxaccessibility/dbusconnection.cpp
++++ b/qtbase/src/platformsupport/linuxaccessibility/dbusconnection.cpp
+@@ -72,4 +72,8 @@ DBusConnection::DBusConnection(QObject *parent)
+     // Start monitoring if "org.a11y.Bus" is registered as DBus service.
+     QDBusConnection c = QDBusConnection::sessionBus();
++    if (!c.isConnected()) {
++        return;
++    }
++
+     dbusWatcher = new QDBusServiceWatcher(A11Y_SERVICE, c, QDBusServiceWatcher::WatchForRegistration, this);
+     connect(dbusWatcher, SIGNAL(serviceRegistered(QString)), this, SLOT(serviceRegistered()));
+--- a/qtbase/src/platformsupport/themes/genericunix/qgenericunixthemes.cpp
++++ b/qtbase/src/platformsupport/themes/genericunix/qgenericunixthemes.cpp
+@@ -120,9 +120,11 @@ static bool isDBusTrayAvailable() {
+ #ifndef QT_NO_DBUS
+ static bool checkDBusGlobalMenuAvailable()
+ {
+-    QDBusConnection connection = QDBusConnection::sessionBus();
+-    QString registrarService = QStringLiteral("com.canonical.AppMenu.Registrar");
+-    return connection.interface()->isServiceRegistered(registrarService);
++    const QDBusConnection connection = QDBusConnection::sessionBus();
++    static const QString registrarService = QStringLiteral("com.canonical.AppMenu.Registrar");
++    if (const auto iface = connection.interface())
++        return iface->isServiceRegistered(registrarService);
++    return false;
+ }
+
+ static bool isDBusGlobalMenuAvailable()
